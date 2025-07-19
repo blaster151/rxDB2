@@ -1,4 +1,5 @@
-import { ZodTypeAny, infer as zInfer } from "zod"
+import { z } from "zod"
+import type { ZodTypeAny, infer as zInfer } from "zod"
 
 export type CollectionDefinition<
   Name extends string,

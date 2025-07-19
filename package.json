@@ -1,19 +1,87 @@
 {
   "name": "rxdb2",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "vitest",
-    "test:run": "vitest run"
+  "description": "A modern, reactive database with runtime type safety and ESM compatibility",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./reactive": {
+      "types": "./dist/chunks/reactive.d.ts",
+      "import": "./dist/chunks/reactive.js",
+      "default": "./dist/chunks/reactive.js"
+    },
+    "./operators": {
+      "types": "./dist/chunks/coreOperators.d.ts",
+      "import": "./dist/chunks/coreOperators.js",
+      "default": "./dist/chunks/coreOperators.js"
+    },
+    "./collections": {
+      "types": "./dist/chunks/collections.d.ts",
+      "import": "./dist/chunks/collections.js",
+      "default": "./dist/chunks/collections.js"
+    },
+    "./storage": {
+      "types": "./dist/chunks/storage.d.ts",
+      "import": "./dist/chunks/storage.js",
+      "default": "./dist/chunks/storage.js"
+    },
+    "./validation": {
+      "types": "./dist/chunks/validation.d.ts",
+      "import": "./dist/chunks/validation.js",
+      "default": "./dist/chunks/validation.js"
+    },
+    "./plugins": {
+      "types": "./dist/chunks/plugins.d.ts",
+      "import": "./dist/chunks/plugins.js",
+      "default": "./dist/chunks/plugins.js"
+    },
+    "./plugins/*": {
+      "types": "./dist/plugins/*/index.d.ts",
+      "import": "./dist/plugins/*/index.js",
+      "default": "./dist/plugins/*/index.js"
+    }
   },
-  "keywords": [],
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc && tsc-alias",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "clean": "rimraf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "database",
+    "reactive",
+    "typescript",
+    "zod",
+    "esm",
+    "tree-shaking",
+    "runtime-validation"
+  ],
   "author": "",
-  "license": "ISC",
-  "description": "",
+  "license": "MIT",
   "dependencies": {
     "zod": "^4.0.5"
   },
   "devDependencies": {
-    "vitest": "^3.2.4"
+    "typescript": "^5.0.0",
+    "vitest": "^3.2.4",
+    "tsc-alias": "^1.8.0",
+    "rimraf": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }

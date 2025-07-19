@@ -39,9 +39,6 @@ export function takeWhile<T>(source: any, predicate: (value: T) => boolean): any
   })
 }
 
-// Re-export zodMap for convenience
-export { zodMap }
-
 // sample operator
 export function sample<T>(source: any, notifier: any): any {
   let latest: T | undefined
@@ -74,6 +71,7 @@ export function switchMap<T, U>(source: any, project: (value: T) => any): any {
   const result = reactive([] as U[])
   let sourceUnsub: (() => void) | null = null
   let currentInnerUnsub: (() => void) | null = null
+  let outerCompleted = false
   
   sourceUnsub = source.subscribe((value: T) => {
     // Unsubscribe from previous inner stream
@@ -165,16 +163,18 @@ export function zip<T, U>(a: any, b: any): any {
 // withLatestFrom operator
 export function withLatestFrom<T, U>(source: any, other: any): any {
   let latestOther: U | undefined
+  let otherHasEmitted = false
   const result = reactive([] as [T, U][])
   let sourceUnsub: (() => void) | null = null
   let otherUnsub: (() => void) | null = null
 
   otherUnsub = other.subscribe((val: U) => {
     latestOther = val
+    otherHasEmitted = true
   })
 
   sourceUnsub = source.subscribe((val: T) => {
-    if (latestOther !== undefined) {
+    if (otherHasEmitted && latestOther !== undefined) {
       result.set([...result.get(), [val, latestOther]])
     }
   })
@@ -187,6 +187,46 @@ export function withLatestFrom<T, U>(source: any, other: any): any {
     if (otherUnsub) {
       otherUnsub()
       otherUnsub = null
+    }
+  })
+}
+
+// combineLatest operator
+export function combineLatest<T, U>(a: any, b: any): any {
+  let latestA: T | undefined
+  let latestB: U | undefined
+  let aHasEmitted = false
+  let bHasEmitted = false
+  const result = reactive([] as [T, U][])
+  let aUnsub: (() => void) | null = null
+  let bUnsub: (() => void) | null = null
+
+  const tryEmit = () => {
+    if (aHasEmitted && bHasEmitted && latestA !== undefined && latestB !== undefined) {
+      result.set([...result.get(), [latestA, latestB]])
+    }
+  }
+
+  aUnsub = a.subscribe((val: T) => {
+    latestA = val
+    aHasEmitted = true
+    tryEmit()
+  })
+
+  bUnsub = b.subscribe((val: U) => {
+    latestB = val
+    bHasEmitted = true
+    tryEmit()
+  })
+
+  return createReactiveWithCleanup(result.get(), () => {
+    if (aUnsub) {
+      aUnsub()
+      aUnsub = null
+    }
+    if (bUnsub) {
+      bUnsub()
+      bUnsub = null
     }
   })
 }
@@ -236,6 +276,217 @@ export function pairwise<T>(source: any): any {
     if (sourceUnsub) {
       sourceUnsub()
       sourceUnsub = null
+    }
+  })
+}
+
+// retry operator
+export function retry<T>(source: any, maxRetries: number): any {
+  const result = reactive(source.get())
+  let retryCount = 0
+  let currentUnsub: (() => void) | null = null
+  
+  const subscribeToSource = () => {
+    currentUnsub = source.subscribe(
+      (value: T) => {
+        result.set(value)
+        retryCount = 0 // Reset retry count on success
+      },
+      (error: any) => {
+        if (retryCount < maxRetries) {
+          retryCount++
+          // Resubscribe to source
+          if (currentUnsub) {
+            currentUnsub()
+          }
+          subscribeToSource()
+        } else {
+          // Max retries reached, emit error
+          console.error('Max retries reached:', error)
+        }
+      }
+    )
+  }
+  
+  subscribeToSource()
+  
+  return createReactiveWithCleanup(result.get(), () => {
+    if (currentUnsub) {
+      currentUnsub()
+      currentUnsub = null
+    }
+  })
+}
+
+// catchError operator
+export function catchError<T>(source: any, errorHandler: (error: any) => any): any {
+  const result = reactive(source.get())
+  let sourceUnsub: (() => void) | null = null
+  let fallbackUnsub: (() => void) | null = null
+  
+  sourceUnsub = source.subscribe(
+    (value: T) => {
+      result.set(value)
+    },
+    (error: any) => {
+      // Switch to fallback stream
+      const fallback = errorHandler(error)
+      if (fallbackUnsub) {
+        fallbackUnsub()
+      }
+      fallbackUnsub = fallback.subscribe((value: T) => {
+        result.set(value)
+      })
+    }
+  )
+  
+  return createReactiveWithCleanup(result.get(), () => {
+    if (sourceUnsub) {
+      sourceUnsub()
+      sourceUnsub = null
+    }
+    if (fallbackUnsub) {
+      fallbackUnsub()
+      fallbackUnsub = null
+    }
+  })
+}
+
+// startWith operator
+export function startWith<T>(source: any, value: T): any {
+  const result = reactive(value)
+  let sourceUnsub: (() => void) | null = null
+  
+  sourceUnsub = source.subscribe((val: T) => {
+    result.set(val)
+  })
+  
+  return createReactiveWithCleanup(result.get(), () => {
+    if (sourceUnsub) {
+      sourceUnsub()
+      sourceUnsub = null
+    }
+  })
+}
+
+// scan operator
+export function scan<T, U>(source: any, reducer: (acc: U, val: T) => U, seed: U): any {
+  const result = reactive(seed)
+  let sourceUnsub: (() => void) | null = null
+  let accumulator = seed
+  
+  sourceUnsub = source.subscribe((value: T) => {
+    accumulator = reducer(accumulator, value)
+    result.set(accumulator)
+  })
+  
+  return createReactiveWithCleanup(result.get(), () => {
+    if (sourceUnsub) {
+      sourceUnsub()
+      sourceUnsub = null
+    }
+  })
+}
+
+// tap operator - for side effects without altering the stream
+export function tap<T>(source: any, fn: (value: T) => void): any {
+  const result = reactive(source.get())
+  let sourceUnsub: (() => void) | null = null
+  
+  sourceUnsub = source.subscribe((value: T) => {
+    // Execute side effect
+    fn(value)
+    // Forward value unchanged
+    result.set(value)
+  })
+  
+  return createReactiveWithCleanup(result.get(), () => {
+    if (sourceUnsub) {
+      sourceUnsub()
+      sourceUnsub = null
+    }
+  })
+}
+
+// concatMap operator - sequential mapping with inner stream completion
+export function concatMap<T, U>(source: any, project: (value: T) => any): any {
+  const result = reactive([] as U[])
+  let sourceUnsub: (() => void) | null = null
+  let currentInnerUnsub: (() => void) | null = null
+  let sourceCompleted = false
+  let innerCompleted = true
+  const queue: T[] = []
+  
+  const processNext = () => {
+    if (queue.length === 0) {
+      if (sourceCompleted && innerCompleted) {
+        // Both source and inner completed, we're done
+        return
+      }
+      return
+    }
+    
+    if (!innerCompleted) {
+      // Still processing current inner, wait
+      return
+    }
+    
+    const value = queue.shift()!
+    innerCompleted = false
+    
+    const inner = project(value)
+    currentInnerUnsub = inner.subscribe(
+      (innerValue: U) => {
+        result.set([...result.get(), innerValue])
+      },
+      (error: any) => {
+        // Inner error propagates immediately
+        console.error('Inner observable error:', error)
+        if (currentInnerUnsub) {
+          currentInnerUnsub()
+          currentInnerUnsub = null
+        }
+      },
+      () => {
+        // Inner completed, process next
+        innerCompleted = true
+        if (currentInnerUnsub) {
+          currentInnerUnsub()
+          currentInnerUnsub = null
+        }
+        processNext()
+      }
+    )
+  }
+  
+  sourceUnsub = source.subscribe(
+    (value: T) => {
+      queue.push(value)
+      processNext()
+    },
+    (error: any) => {
+      // Source error propagates immediately
+      console.error('Source observable error:', error)
+      if (currentInnerUnsub) {
+        currentInnerUnsub()
+        currentInnerUnsub = null
+      }
+    },
+    () => {
+      // Source completed
+      sourceCompleted = true
+      processNext()
+    }
+  )
+  
+  return createReactiveWithCleanup(result.get(), () => {
+    if (sourceUnsub) {
+      sourceUnsub()
+      sourceUnsub = null
+    }
+    if (currentInnerUnsub) {
+      currentInnerUnsub()
+      currentInnerUnsub = null
     }
   })
 } 

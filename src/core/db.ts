@@ -1,4 +1,4 @@
-import { CollectionDefinition } from "./collection"
+import type { CollectionDefinition } from "./collection.js"
 
 type CollectionInstance<Doc> = {
   insert(doc: Doc): Promise<Doc>
@@ -18,6 +18,7 @@ export function createDatabase<
 
   for (const key in defs) {
     const def = defs[key]
+    if (!def) continue
     const collection: any[] = []
 
     db[key] = {

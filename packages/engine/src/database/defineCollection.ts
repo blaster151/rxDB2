@@ -1,177 +1,406 @@
-import { z, ZodSchema, ZodError } from 'zod'
-import { reactive } from '../reactive'
+import { z } from 'zod'
+import type { ZodSchema } from 'zod'
+import { reactive } from '../reactive.js'
 
-export type InsertResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: ZodError | string }
-
-export type UpdateResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: ZodError | string }
-
-export type DeleteResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: string }
-
-export interface Collection<T> {
-  insert: (item: unknown) => void
-  tryInsert: (item: unknown) => InsertResult<T>
-  validateInsert: (item: unknown) => InsertResult<T>
-  update: (id: any, updates: Partial<T>) => UpdateResult<T>
-  tryUpdate: (id: any, updates: Partial<T>) => UpdateResult<T>
-  delete: (id: any) => DeleteResult<T>
-  tryDelete: (id: any) => DeleteResult<T>
-  getAll: () => T[]
-  live: () => any // Returns reactive stream of all items
-  where: (filter: Partial<T>) => any // Returns filtered reactive stream
-  schema: ZodSchema<T> // Expose schema for validation
+// Collection readiness state
+export enum CollectionState {
+  INITIALIZING = 'initializing',
+  READY = 'ready',
+  ERROR = 'error',
+  DISCONNECTED = 'disconnected'
 }
 
-const internalDb = new Map<string, any>()
-const collectionSchemas = new Map<string, ZodSchema>()
+// Collection readiness interface
+export interface CollectionReadiness {
+  state: CollectionState
+  error?: Error | undefined
+  lastCheck?: Date
+}
 
-export function defineCollection<T>(name: string, schema: ZodSchema<T>): Collection<T> {
-  collectionSchemas.set(name, schema)
-  const data: T[] = []
-  const dataStream = reactive(data)
+// Enhanced collection interface with readiness
+export interface Collection<T extends { id: any }> {
+  // Core CRUD operations
+  insert(item: T): void
+  tryInsert(item: T): InsertResult<T>
+  update(id: T['id'], updates: Partial<T>): void
+  tryUpdate(id: T['id'], updates: Partial<T>): UpdateResult<T>
+  delete(id: T['id']): void
+  tryDelete(id: T['id']): DeleteResult<T>
+  
+  // Query operations
+  find(filter?: Partial<T>): any
+  findOne(filter?: Partial<T>): T | undefined
+  
+  // Readiness and state management
+  readonly readiness: CollectionReadiness
+  isReady(): boolean
+  waitForReady(): Promise<void>
+  
+  // Collection metadata
+  readonly name: string
+  readonly schema: ZodSchema<T>
+  readonly count: number
+}
 
-  const collection: Collection<T> = {
-    insert: (item: unknown) => {
-      const parsed = schema.parse(item)
-      
-      // Check for duplicate ID
-      const existingIndex = data.findIndex(existing => (existing as any).id === (parsed as any).id)
-      if (existingIndex !== -1) {
-        throw new Error(`Item with id ${(parsed as any).id} already exists`)
-      }
-      
-      data.push(parsed)
-      dataStream.set([...data]) // Update reactive stream
-    },
-    tryInsert: (item: unknown): InsertResult<T> => {
-      try {
-        const parsed = schema.parse(item)
-        
-        // Check for duplicate ID
-        const existingIndex = data.findIndex(existing => (existing as any).id === (parsed as any).id)
-        if (existingIndex !== -1) {
-          return { success: false, error: `Item with id ${(parsed as any).id} already exists` }
-        }
-        
-        data.push(parsed)
-        dataStream.set([...data]) // Update reactive stream
-        return { success: true, data: parsed }
-      } catch (err) {
-        if (err instanceof ZodError) {
-          return { success: false, error: err }
-        }
-        throw err // rethrow non-Zod errors
-      }
-    },
-    validateInsert: (item: unknown): InsertResult<T> => {
-      try {
-        const parsed = schema.parse(item)
-        
-        // Check for duplicate ID (validation only, don't insert)
-        const existingIndex = data.findIndex(existing => (existing as any).id === (parsed as any).id)
-        if (existingIndex !== -1) {
-          return { success: false, error: `Item with id ${(parsed as any).id} already exists` }
-        }
-        
-        return { success: true, data: parsed }
-      } catch (err) {
-        if (err instanceof ZodError) {
-          return { success: false, error: err }
-        }
-        throw err // rethrow non-Zod errors
-      }
-    },
-    update: (id: any, updates: Partial<T>) => {
-      const index = data.findIndex(item => (item as any).id === id)
-      if (index === -1) {
-        throw new Error(`Item with id ${id} not found`)
-      }
-      
-      const updatedItem = { ...data[index], ...updates }
-      const parsed = schema.parse(updatedItem)
-      data[index] = parsed
-      dataStream.set([...data]) // Update reactive stream
-      return { success: true, data: parsed }
-    },
-    tryUpdate: (id: any, updates: Partial<T>): UpdateResult<T> => {
-      try {
-        const index = data.findIndex(item => (item as any).id === id)
-        if (index === -1) {
-          return { success: false, error: `Item with id ${id} not found` }
-        }
-        
-        const updatedItem = { ...data[index], ...updates }
-        const parsed = schema.parse(updatedItem)
-        data[index] = parsed
-        dataStream.set([...data]) // Update reactive stream
-        return { success: true, data: parsed }
-      } catch (err) {
-        if (err instanceof ZodError) {
-          return { success: false, error: err }
-        }
-        return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
-      }
-    },
-    delete: (id: any) => {
-      const index = data.findIndex(item => (item as any).id === id)
-      if (index === -1) {
-        throw new Error(`Item with id ${id} not found`)
-      }
-      
-      const deletedItem = data[index]
-      data.splice(index, 1)
-      dataStream.set([...data]) // Update reactive stream
-      return { success: true, data: deletedItem }
-    },
-    tryDelete: (id: any): DeleteResult<T> => {
-      const index = data.findIndex(item => (item as any).id === id)
-      if (index === -1) {
-        return { success: false, error: `Item with id ${id} not found` }
-      }
-      
-      const deletedItem = data[index]
-      data.splice(index, 1)
-      dataStream.set([...data]) // Update reactive stream
-      return { success: true, data: deletedItem }
-    },
-    getAll: () => [...data],
-    live: () => dataStream,
-    where: (filter: Partial<T>) => {
-      const filtered = data.filter(item => {
-        return Object.entries(filter).every(([key, value]) => 
-          item[key as keyof T] === value
-        )
-      })
-      const filteredStream = reactive(filtered)
-      
-      // Subscribe to data changes and update filtered stream
-      dataStream.subscribe(allData => {
-        const newFiltered = allData.filter(item => {
-          return Object.entries(filter).every(([key, value]) => 
-            item[key as keyof T] === value
-          )
-        })
-        filteredStream.set(newFiltered)
-      })
-      
-      return filteredStream
-    },
-    schema // Expose schema for external validation
+// Result types for safe operations
+export interface InsertResult<T> {
+  success: boolean
+  data?: T
+  errors?: z.ZodError[]
+}
+
+export interface UpdateResult<T> {
+  success: boolean
+  data?: T
+  errors?: z.ZodError[]
+}
+
+export interface DeleteResult<T> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
+// Global collection registry
+const collections = new Map<string, Collection<any>>()
+const schemas = new Map<string, ZodSchema>()
+
+// Readiness manager
+class ReadinessManager {
+  private readinessStates = new Map<string, CollectionReadiness>()
+  private readinessCallbacks = new Map<string, Set<() => void>>()
+
+  setState(collectionName: string, state: CollectionState, error?: Error) {
+    const readiness: CollectionReadiness = {
+      state,
+      error,
+      lastCheck: new Date()
+    }
+    
+    this.readinessStates.set(collectionName, readiness)
+    
+    // Notify callbacks
+    const callbacks = this.readinessCallbacks.get(collectionName)
+    if (callbacks) {
+      callbacks.forEach(callback => callback())
+    }
   }
 
-  internalDb.set(name, collection)
+  getState(collectionName: string): CollectionReadiness {
+    return this.readinessStates.get(collectionName) || {
+      state: CollectionState.INITIALIZING,
+      lastCheck: new Date()
+    }
+  }
+
+  onReady(collectionName: string, callback: () => void) {
+    if (!this.readinessCallbacks.has(collectionName)) {
+      this.readinessCallbacks.set(collectionName, new Set())
+    }
+    this.readinessCallbacks.get(collectionName)!.add(callback)
+  }
+
+  offReady(collectionName: string, callback: () => void) {
+    const callbacks = this.readinessCallbacks.get(collectionName)
+    if (callbacks) {
+      callbacks.delete(callback)
+    }
+  }
+}
+
+const readinessManager = new ReadinessManager()
+
+// Warning system
+class WarningSystem {
+  private warnings = new Set<string>()
+
+  warn(message: string, context?: string) {
+    const warningKey = `${message}:${context || ''}`
+    if (!this.warnings.has(warningKey)) {
+      this.warnings.add(warningKey)
+      console.warn(`[rxDB2] ${message}${context ? ` (${context})` : ''}`)
+    }
+  }
+
+  clearWarnings() {
+    this.warnings.clear()
+  }
+}
+
+const warningSystem = new WarningSystem()
+
+export function defineCollection<T extends { id: any }>(name: string, schema: ZodSchema<T>): Collection<T> {
+  // Initialize readiness state
+  readinessManager.setState(name, CollectionState.INITIALIZING)
+  
+  // Simulate async initialization (in real implementation, this would check backing store)
+  setTimeout(() => {
+    readinessManager.setState(name, CollectionState.READY)
+  }, 0)
+
+  const data = reactive<T[]>([])
+  const readiness = reactive<CollectionReadiness>({
+    state: CollectionState.INITIALIZING,
+    lastCheck: new Date()
+  })
+
+  // Update readiness state when it changes
+  readinessManager.onReady(name, () => {
+    const state = readinessManager.getState(name)
+    readiness.set(state)
+  })
+
+  const collection: Collection<T> = {
+    name,
+    schema,
+    get count() { return data.get().length },
+    get readiness() { return readiness.get() },
+
+    isReady(): boolean {
+      return readiness.get().state === CollectionState.READY
+    },
+
+    async waitForReady(): Promise<void> {
+      if (this.isReady()) return
+      
+      return new Promise((resolve) => {
+        const checkReady = () => {
+          if (this.isReady()) {
+            readinessManager.offReady(name, checkReady)
+            resolve()
+          }
+        }
+        readinessManager.onReady(name, checkReady)
+        checkReady() // Check immediately in case it's already ready
+      })
+    },
+
+    insert(item: T): void {
+      if (!this.isReady()) {
+        warningSystem.warn(`Collection '${name}' not ready. Operation may fail.`, 'insert')
+      }
+
+      const result = this.tryInsert(item)
+      if (!result.success) {
+        throw new Error(`Insert failed: ${result.errors?.map(e => e.message).join(', ')}`)
+      }
+    },
+
+    tryInsert(item: T): InsertResult<T> {
+      if (!this.isReady()) {
+        warningSystem.warn(`Collection '${name}' not ready. Insert may fail.`, 'tryInsert')
+      }
+
+      try {
+        const validated = schema.parse(item)
+        const existing = data.get().find((d: T) => d.id === validated.id)
+        
+        if (existing) {
+          return {
+            success: false,
+            errors: [new z.ZodError([{
+              code: 'custom',
+              path: ['id'],
+              message: 'Item with this ID already exists',
+              input: validated.id
+            }])]
+          }
+        }
+
+        data.set([...data.get(), validated])
+        return { success: true, data: validated }
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return { success: false, errors: [error] }
+        }
+        return { success: false, errors: [new z.ZodError([{
+          code: 'custom',
+          path: [],
+          message: error instanceof Error ? error.message : 'Unknown error',
+          input: item
+        }])] }
+      }
+    },
+
+    update(id: T['id'], updates: Partial<T>): void {
+      if (!this.isReady()) {
+        warningSystem.warn(`Collection '${name}' not ready. Operation may fail.`, 'update')
+      }
+
+      const result = this.tryUpdate(id, updates)
+      if (!result.success) {
+        throw new Error(`Update failed: ${result.errors?.map(e => e.message).join(', ')}`)
+      }
+    },
+
+    tryUpdate(id: T['id'], updates: Partial<T>): UpdateResult<T> {
+      if (!this.isReady()) {
+        warningSystem.warn(`Collection '${name}' not ready. Update may fail.`, 'tryUpdate')
+      }
+
+      try {
+        const items = data.get()
+        const index = items.findIndex(item => item.id === id)
+        
+        if (index === -1) {
+          return {
+            success: false,
+            errors: [new z.ZodError([{
+              code: 'custom',
+              path: ['id'],
+              message: 'Item not found',
+              input: id
+            }])]
+          }
+        }
+
+        const updatedItem = { ...items[index], ...updates }
+        const validated = schema.parse(updatedItem)
+        
+        const newItems = [...items]
+        newItems[index] = validated
+        data.set(newItems)
+        
+        return { success: true, data: validated }
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return { success: false, errors: [error] }
+        }
+        return { success: false, errors: [new z.ZodError([{
+          code: 'custom',
+          path: [],
+          message: error instanceof Error ? error.message : 'Unknown error',
+          input: updates
+        }])] }
+      }
+    },
+
+    delete(id: T['id']): void {
+      if (!this.isReady()) {
+        warningSystem.warn(`Collection '${name}' not ready. Operation may fail.`, 'delete')
+      }
+
+      const result = this.tryDelete(id)
+      if (!result.success) {
+        throw new Error(`Delete failed: ${result.error}`)
+      }
+    },
+
+    tryDelete(id: T['id']): DeleteResult<T> {
+      if (!this.isReady()) {
+        warningSystem.warn(`Collection '${name}' not ready. Delete may fail.`, 'tryDelete')
+      }
+
+      const items = data.get()
+      const index = items.findIndex(item => item.id === id)
+      
+      if (index === -1) {
+        return {
+          success: false,
+          error: 'Item not found'
+        }
+      }
+
+      const deletedItem = items[index]
+      const newItems = items.filter(item => item.id !== id)
+      data.set(newItems)
+      
+      return { success: true, data: deletedItem }
+    },
+
+    find(filter?: Partial<T>): any {
+      if (!this.isReady()) {
+        warningSystem.warn(`Collection '${name}' not ready. Query may return incomplete results.`, 'find')
+      }
+
+      const items = data.get()
+      const filtered = filter ? filterDocs(items, filter) : items
+      
+      // Return reactive array that updates when data changes
+      const result = reactive(filtered)
+      
+      // Subscribe to data changes and update result
+      data.subscribe((newItems) => {
+        const newFiltered = filter ? filterDocs(newItems, filter) : newItems
+        result.set(newFiltered)
+      })
+      
+      return result
+    },
+
+    findOne(filter?: Partial<T>): T | undefined {
+      if (!this.isReady()) {
+        warningSystem.warn(`Collection '${name}' not ready. Query may return incomplete results.`, 'findOne')
+      }
+
+      const items = data.get()
+      return filter ? filterDocs(items, filter)[0] : items[0]
+    }
+  }
+
+  // Register collection
+  collections.set(name, collection)
+  schemas.set(name, schema)
+
   return collection
 }
 
+// Helper function to filter documents
+function filterDocs<T>(docs: T[], filter: Partial<T>): T[] {
+  return docs.filter(doc => match(doc, filter))
+}
+
+// Helper function to match document against filter
+function match<T>(doc: T, filter: Partial<T>): boolean {
+  for (const [key, value] of Object.entries(filter)) {
+    if (value === undefined) continue
+    
+    const docValue = (doc as any)[key]
+    
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Handle complex filters like { $gte: 5 }
+      if ('$gte' in value) {
+        if (docValue < (value as any).$gte) return false
+      } else if ('$lte' in value) {
+        if (docValue > (value as any).$lte) return false
+      } else if ('$gt' in value) {
+        if (docValue <= (value as any).$gt) return false
+      } else if ('$lt' in value) {
+        if (docValue >= (value as any).$lt) return false
+      } else if ('$in' in value) {
+        if (!(value as any).$in.includes(docValue)) return false
+      } else if ('$regex' in value) {
+        const regex = new RegExp((value as any).$regex)
+        if (!regex.test(String(docValue))) return false
+      } else {
+        // Recursive match for nested objects
+        if (!match(docValue, value as any)) return false
+      }
+    } else {
+      // Simple equality check
+      if (docValue !== value) return false
+    }
+  }
+  return true
+}
+
 export function getCollection<T>(name: string): Collection<T> | undefined {
-  return internalDb.get(name)
+  return collections.get(name)
 }
 
 export function getSchema(name: string): ZodSchema | undefined {
-  return collectionSchemas.get(name)
+  return schemas.get(name)
+}
+
+// Export readiness utilities
+export function setCollectionState(name: string, state: CollectionState, error?: Error) {
+  readinessManager.setState(name, state, error)
+}
+
+export function getCollectionState(name: string): CollectionReadiness {
+  return readinessManager.getState(name)
+}
+
+export function clearWarnings() {
+  warningSystem.clearWarnings()
 } 

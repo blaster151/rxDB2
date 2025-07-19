@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/engine/*": ["packages/engine/src/*"],
+      "@/storage/*": ["src/storage/*"],
+      "@/reactive/*": ["src/reactive/*"],
+      "@/plugins/*": ["plugins/*"]
+    }
+  }
+} 
