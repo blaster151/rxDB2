@@ -1,4 +1,5 @@
 import { reactive } from './reactive'
+import { zodMap } from './operators/zodMap'
 
 // Helper function to create a reactive with cleanup
 function createReactiveWithCleanup<T>(initial: T, cleanup: () => void): any {
@@ -37,6 +38,9 @@ export function takeWhile<T>(source: any, predicate: (value: T) => boolean): any
     }
   })
 }
+
+// Re-export zodMap for convenience
+export { zodMap }
 
 // sample operator
 export function sample<T>(source: any, notifier: any): any {
