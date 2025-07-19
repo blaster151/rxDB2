@@ -1,5 +1,5 @@
-import { reactive } from '../reactive'
-import { ZodSchema } from 'zod'
+import type { ZodSchema } from 'zod'
+import { map } from './index.js'
 
 export interface ZodMapOptions {
   filterInvalid?: boolean

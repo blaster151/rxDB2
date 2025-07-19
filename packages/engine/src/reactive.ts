@@ -1,5 +1,6 @@
 // engine/src/reactive.ts
-import { Observable, createObservable } from './createObservable'
+import { createObservable } from './createObservable'
+import type { Observable } from './createObservable'
 
 export interface Reactive<T> extends Observable<T> {
   map<U>(fn: (value: T) => U): Reactive<U>
