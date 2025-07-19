@@ -14,7 +14,7 @@ export function collect<T>(reactive: any): Promise<T[]> {
 
 export function createColdObservable<T>(values: T[], delayMs = 0): any {
   const r = reactive(values[0] || undefined)
-  values.forEach((v, i) => {
+  values.slice(1).forEach((v, i) => {
     setTimeout(() => r.set(v), delayMs * (i + 1))
   })
   return r

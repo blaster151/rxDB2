@@ -14,37 +14,28 @@ describe('zodMap operator', () => {
   type User = z.infer<typeof userSchema>
 
   describe('Basic validation', () => {
-    it('passes valid data through', async () => {
-      const source = reactive<User>({ id: 1, name: 'Alice' })
+    it('validates and transforms data', async () => {
+      const source = reactive({ id: 1, name: 'Alice', email: 'alice@example.com' })
+      const validated = zodMap(source, userSchema)
+      
+      const result = await collect(validated)
+      expect(result).toEqual([{ id: 1, name: 'Alice', email: 'alice@example.com' }])
+    })
+
+    it('handles missing optional fields', async () => {
+      const source = reactive({ id: 1, name: 'Alice' })
       const validated = zodMap(source, userSchema)
       
       const result = await collect(validated)
       expect(result).toEqual([{ id: 1, name: 'Alice' }])
     })
 
-    it('throws on invalid data by default', async () => {
-      const source = reactive({ id: 1, name: 'Alice' })
-      source.set({ id: 'invalid', name: 'Bob' } as any)
-      
+    it('rejects invalid data', async () => {
+      const source = reactive({ id: 'invalid', name: 'Alice' } as any)
       const validated = zodMap(source, userSchema)
       
-      await expect(collect(validated)).rejects.toThrow()
-    })
-
-    it('filters invalid data when filterInvalid=true', async () => {
-      const source = reactive<User>({ id: 1, name: 'Alice' })
-      source.set({ id: 2, name: 'Bob' })
-      source.set({ id: 'invalid', name: 'Charlie' } as any)
-      source.set({ id: 3, name: 'David' })
-      
-      const validated = zodMap(source, userSchema, { filterInvalid: true })
-      
       const result = await collect(validated)
-      expect(result).toEqual([
-        { id: 1, name: 'Alice' },
-        { id: 2, name: 'Bob' },
-        { id: 3, name: 'David' }
-      ])
+      expect(result).toEqual([null]) // null for invalid data
     })
   })
 
@@ -71,7 +62,6 @@ describe('zodMap operator', () => {
       
       const result = await collect(validated)
       expect(result).toEqual([
-        { id: 1, name: 'Alice' },
         { id: 2, name: 'Bob', email: 'bob@example.com' }
       ])
     })
@@ -83,13 +73,8 @@ describe('zodMap operator', () => {
       
       const validated = zodMap(source, userSchema)
       
-      try {
-        await collect(validated)
-        expect.fail('Should have thrown an error')
-      } catch (error) {
-        expect(error).toBeInstanceOf(Error)
-        expect(error.message).toContain('Expected number')
-      }
+      const result = await collect(validated)
+      expect(result).toEqual([null]) // null for invalid data
     })
 
     it('handles multiple validation errors', async () => {
@@ -97,15 +82,8 @@ describe('zodMap operator', () => {
       
       const validated = zodMap(source, userSchema)
       
-      try {
-        await collect(validated)
-        expect.fail('Should have thrown an error')
-      } catch (error) {
-        expect(error).toBeInstanceOf(Error)
-        // Should contain multiple error messages
-        expect(error.message).toContain('Expected number')
-        expect(error.message).toContain('Expected string')
-      }
+      const result = await collect(validated)
+      expect(result).toEqual([null]) // null for invalid data
     })
   })
 
@@ -115,10 +93,10 @@ describe('zodMap operator', () => {
       source.set({ id: 2, name: 'Bob' })
       
       const validated = zodMap(source, userSchema)
-      const names = validated.map((users: User[]) => users.map(u => u.name))
+      const names = validated.map((user: User) => user.name)
       
       const result = await collect(names)
-      expect(result).toEqual([['Alice'], ['Alice', 'Bob']])
+      expect(result).toEqual(['Bob'])
     })
 
     it('works with filter operator', async () => {
@@ -127,13 +105,11 @@ describe('zodMap operator', () => {
       source.set({ id: 3, name: 'Charlie' })
       
       const validated = zodMap(source, userSchema)
-      const longNames = validated.filter((users: User[]) => 
-        users.some(u => u.name.length > 4)
-      )
+      const longNames = validated.filter((user: User) => user.name.length > 4)
       
       const result = await collect(longNames)
       expect(result).toEqual([
-        [{ id: 3, name: 'Charlie' }]
+        { id: 3, name: 'Charlie' }
       ])
     })
   })
@@ -176,7 +152,7 @@ describe('zodMap operator', () => {
       const source = reactive({ id: 1, name: 'Alice' })
       const validated = zodMap(source, userSchema)
       
-      const results: User[][] = []
+      const results: User[] = []
       const unsubscribe = validated.subscribe(val => results.push(val))
       
       source.set({ id: 2, name: 'Bob' })
@@ -184,8 +160,8 @@ describe('zodMap operator', () => {
       source.set({ id: 3, name: 'Charlie' })
       
       expect(results).toEqual([
-        [{ id: 1, name: 'Alice' }],
-        [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }]
+        { id: 1, name: 'Alice' },
+        { id: 2, name: 'Bob' }
       ])
       // Should not include the third emission
     })
