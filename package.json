@@ -1,0 +1,19 @@
+{
+  "name": "rxdb2",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
